@@ -1,0 +1,259 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Riesgo de incendios - San Fernando del Valle de Catamarca</title>
+<link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css">
+<style>
+  :root { --bg:#f4f5f7; --card:#fff; --txt:#1c2330; --mut:#5d6778; --bor:#d9dde4; --ok:#1f8a4c; --warn:#c77700; --alto:#c62828; --acc:#1b4d8c; }
+  @media (prefers-color-scheme: dark) { :root { --bg:#12161d; --card:#1b212b; --txt:#e8ecf2; --mut:#9aa6b8; --bor:#2b3442; --ok:#4cc987; --warn:#f0a43a; --alto:#ff6b6b; --acc:#7db1f0; } }
+  * { box-sizing: border-box; }
+  body { margin:0; font-family: system-ui, Segoe UI, Arial, sans-serif; background:var(--bg); color:var(--txt); }
+  header { display:flex; flex-wrap:wrap; gap:8px; justify-content:space-between; align-items:center; padding:12px 16px; border-bottom:1px solid var(--bor); background:var(--card); }
+  h1 { font-size:18px; margin:0; } .mut { color:var(--mut); font-size:13px; }
+  main { padding:16px; max-width:1200px; margin:0 auto; }
+  .cards { display:grid; grid-template-columns:repeat(auto-fit,minmax(220px,1fr)); gap:12px; margin-bottom:12px; }
+  .card { background:var(--card); border:1px solid var(--bor); border-radius:8px; padding:12px 14px; }
+  .card h3 { margin:0 0 6px; font-size:13px; color:var(--mut); font-weight:600; text-transform:uppercase; letter-spacing:.04em; }
+  .big { font-size:28px; font-weight:700; } .alto { color:var(--alto); } .ok { color:var(--ok); } .warn { color:var(--warn); }
+  .tabs { display:flex; gap:4px; margin:12px 0; } .tabs button { padding:8px 14px; border:1px solid var(--bor); background:var(--card); color:var(--txt); border-radius:6px; cursor:pointer; }
+  .tabs button.act { background:var(--acc); color:#fff; border-color:var(--acc); }
+  .fila { display:grid; grid-template-columns:2fr 1fr; gap:12px; } @media (max-width:850px){ .fila { grid-template-columns:1fr; } }
+  #mapa { height:420px; border-radius:8px; border:1px solid var(--bor); }
+  table { width:100%; border-collapse:collapse; font-size:14px; } th,td { padding:8px; border-bottom:1px solid var(--bor); text-align:left; vertical-align:top; }
+  select,input,button.btn { padding:7px 10px; border:1px solid var(--bor); border-radius:6px; background:var(--card); color:var(--txt); }
+  button.btn { background:var(--acc); color:#fff; cursor:pointer; border-color:var(--acc); }
+  .barra { display:flex; flex-wrap:wrap; gap:8px; align-items:center; margin-bottom:10px; }
+  #login { position:fixed; inset:0; background:var(--bg); display:flex; align-items:center; justify-content:center; z-index:2000; }
+  #login form { background:var(--card); border:1px solid var(--bor); padding:24px; border-radius:10px; width:min(340px,90vw); display:grid; gap:10px; }
+  .oculto { display:none !important; } .err { color:var(--alto); font-size:13px; min-height:1em; }
+</style>
+</head>
+<body>
+<div id="login">
+  <form id="f-login">
+    <h1>Ingreso al sistema</h1><span class="mut">Riesgo de incendios · San Fernando del Valle de Catamarca</span>
+    <input id="l-nombre" placeholder="Usuario" autocomplete="username" required>
+    <input id="l-clave" type="password" placeholder="Contraseña" autocomplete="current-password" required>
+    <button class="btn" type="submit">Ingresar</button><div class="err" id="l-err"></div>
+  </form>
+</div>
+
+<header>
+  <div><h1>Sistema de predicción de riesgo de incendios</h1><span class="mut" id="territorio">-</span></div>
+  <div class="mut"><span id="usuario"></span> <button class="btn" id="salir">Salir</button></div>
+</header>
+
+<main>
+  <div class="cards">
+    <div class="card"><h3>Riesgo previsto (24 h)</h3><div class="big" id="r-valor">Sin información</div>
+      <div id="r-nivel"></div><div class="mut" id="r-detalle"></div>
+      <div class="mut">Puntuación del modelo; no es una probabilidad calibrada.</div></div>
+    <div class="card"><h3>Datos meteorológicos</h3><div id="c-datos">Sin información</div><div class="mut" id="c-fuente"></div></div>
+    <div class="card"><h3>Focos de calor</h3><div class="big" id="f-total">-</div><div class="mut" id="f-det"></div>
+      <div class="mut">Anomalías térmicas de NASA FIRMS: pueden ser falsos positivos.</div></div>
+    <div class="card"><h3>Estado de las fuentes</h3><div id="antig"></div><div class="mut">Umbral vigente: <b id="umbral">-</b></div></div>
+  </div>
+
+  <div class="tabs">
+    <button data-tab="t-mapa" class="act">Mapa y riesgo</button>
+    <button data-tab="t-hist">Historial de alertas</button>
+    <button data-tab="t-conf" id="b-conf" class="oculto">Configuración</button>
+  </div>
+
+  <section id="t-mapa">
+    <div class="barra"><label>Focos de los últimos
+      <select id="ventana"><option value="24">24 horas</option><option value="72">72 horas</option><option value="168">7 días</option></select></label>
+      <span class="mut" id="generado"></span></div>
+    <div class="fila"><div id="mapa"></div><div class="card"><canvas id="grafico"></canvas></div></div>
+  </section>
+
+  <section id="t-hist" class="oculto">
+    <div class="barra">
+      <label>Desde <input type="date" id="h-desde"></label>
+      <label>Estado <select id="h-estado"><option value="">todos</option><option value="pendiente">pendiente</option><option value="confirmada">confirmada</option><option value="sin_confirmar">sin confirmar</option></select></label>
+      <label>Organismo <select id="h-org"><option value="">todos</option><option>Defensa Civil</option><option>Bomberos</option></select></label>
+      <button class="btn" id="h-buscar">Buscar</button>
+      <button class="btn" id="h-mas">Ver historial completo</button>
+    </div>
+    <div class="card"><table><thead><tr><th>Fecha y hora</th><th>Válida para</th><th>Puntuación / umbral</th><th>Estado</th><th>Confirmación por organismo</th></tr></thead><tbody id="h-cuerpo"></tbody></table></div>
+    <h3>Informes semanales</h3>
+    <div class="card"><table><thead><tr><th>Período</th><th>Generado</th><th>Entrega</th><th>Confirmación de recepción</th></tr></thead><tbody id="i-cuerpo"></tbody></table></div>
+  </section>
+
+  <section id="t-conf" class="oculto">
+    <div class="card" style="max-width:420px"><h3>Umbral de alerta</h3>
+      <p class="mut">Se alerta cuando la puntuación es mayor o igual al umbral. Rango permitido: 0,50 a 0,95.</p>
+      <div class="barra"><input type="number" id="u-valor" step="0.01" min="0.5" max="0.95"><button class="btn" id="u-guardar">Guardar</button></div>
+      <div id="u-msg" class="mut"></div></div>
+  </section>
+</main>
+
+<script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.1/dist/chart.umd.min.js"></script>
+<script>
+let verTodo = false, token = null, usuario = null, datos = null, mapa, capaFocos, capaRiesgo, grafico;
+const $ = id => document.getElementById(id);
+const TZ = 'America/Argentina/Catamarca';
+const fmtFecha = iso => iso ? new Date(iso).toLocaleString('es-AR', { timeZone: TZ, dateStyle: 'short', timeStyle: 'short' }) : 'Sin información';
+const num = (v, d = 1, u = '') => (v === null || v === undefined) ? 'Sin información' : v.toFixed(d).replace('.', ',') + u;
+const antig = h => h === null || h === undefined ? 'sin datos registrados' : (h < 1 ? 'hace menos de 1 h' : `hace ${Math.round(h)} h`);
+
+function guardarSesion(t) { try { sessionStorage.setItem('tok', t); } catch (e) {} }
+function leerSesion() { try { return sessionStorage.getItem('tok'); } catch (e) { return null; } }
+
+async function api(ruta, opciones = {}) {
+  const r = await fetch(ruta, { ...opciones, headers: { 'Content-Type': 'application/json', ...(token ? { Authorization: 'Bearer ' + token } : {}) } });
+  if (r.status === 401) { mostrarLogin(); throw new Error('sesión'); }
+  const cuerpo = await r.json().catch(() => ({}));
+  if (!r.ok) throw new Error(cuerpo.detail || 'Error ' + r.status);
+  return cuerpo;
+}
+function mostrarLogin() { token = null; $('login').classList.remove('oculto'); }
+
+$('f-login').addEventListener('submit', async e => {
+  e.preventDefault(); $('l-err').textContent = '';
+  try {
+    const r = await api('/api/login', { method: 'POST', body: JSON.stringify({ nombre: $('l-nombre').value, clave: $('l-clave').value }) });
+    token = r.token; usuario = r; guardarSesion(token); $('l-clave').value = ''; iniciar();
+  } catch (err) { $('l-err').textContent = err.message === 'sesión' ? 'Usuario o contraseña incorrectos' : err.message; }
+});
+$('salir').onclick = () => { try { sessionStorage.removeItem('tok'); } catch (e) {} location.reload(); };
+
+document.querySelectorAll('.tabs button').forEach(b => b.onclick = () => {
+  document.querySelectorAll('.tabs button').forEach(x => x.classList.toggle('act', x === b));
+  ['t-mapa', 't-hist', 't-conf'].forEach(id => $(id).classList.toggle('oculto', id !== b.dataset.tab));
+  if (b.dataset.tab === 't-mapa') setTimeout(() => mapa.invalidateSize(), 50);
+  if (b.dataset.tab === 't-hist') { cargarHistorial(); cargarInformes(); }
+});
+
+function crearMapa() {
+  if (mapa) return;
+  mapa = L.map('mapa').setView([datos.territorio.lat, datos.territorio.lon], 12);
+  L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', { attribution: '© OpenStreetMap' }).addTo(mapa);
+  capaFocos = L.layerGroup().addTo(mapa); capaRiesgo = L.layerGroup().addTo(mapa);
+  L.control.layers(null, { 'Focos de calor (NASA FIRMS)': capaFocos, 'Riesgo previsto (24 h)': capaRiesgo }).addTo(mapa);
+}
+
+function pintarMapa() {
+  capaFocos.clearLayers(); capaRiesgo.clearLayers();
+  const rv = datos.riesgo_vigente, alto = rv && rv.nivel === 'ALTO';
+  const color = rv && rv.indice !== null ? (alto ? '#c62828' : '#1f8a4c') : '#888';
+  const capa = L.geoJSON(datos.limite, { style: { color, fillColor: color, fillOpacity: 0.15, weight: 2, dashArray: datos.limite.properties && datos.limite.properties.aproximado ? '6 4' : null } });
+  capa.bindTooltip(rv && rv.indice !== null ? `Riesgo previsto: ${num(rv.indice, 2)} (${rv.nivel})` : 'Riesgo: sin información');
+  capa.addTo(capaRiesgo);
+  const desde = Date.now() - parseInt($('ventana').value) * 3600 * 1000;
+  datos.focos.filter(f => new Date(f.fecha_hora).getTime() >= desde).forEach(f => {
+    const m = L.circleMarker([f.lat, f.lon], { color: '#c62828', fillColor: '#ff5252', fillOpacity: .85, radius: 6 });
+    const p = document.createElement('div');
+    p.textContent = `Foco · ${fmtFecha(f.fecha_hora)} · FRP ${f.frp ?? 's/d'} MW · confianza ${f.confianza ?? 's/d'}`;
+    m.bindPopup(p).addTo(capaFocos);
+  });
+}
+
+function contarFocos() {
+  const desde = Date.now() - parseInt($('ventana').value) * 3600 * 1000;
+  $('f-total').textContent = datos.focos.filter(f => new Date(f.fecha_hora).getTime() >= desde).length;
+  $('f-det').textContent = `en las últimas ${$('ventana').selectedOptions[0].text}`;
+}
+
+function pintarGrafico() {
+  const r = datos.riesgos, u = datos.umbral;
+  if (grafico) grafico.destroy();
+  grafico = new Chart($('grafico'), {
+    data: { labels: r.map(x => x.fecha_objetivo.slice(5) + (x.demo ? ' (demo)' : '')),
+      datasets: [{ type: 'bar', label: 'Puntuación de riesgo', data: r.map(x => x.indice), backgroundColor: r.map(x => x.indice >= u ? 'rgba(198,40,40,.75)' : 'rgba(31,138,76,.7)') },
+                 { type: 'line', label: `Umbral (${u.toFixed(2).replace('.', ',')})`, data: r.map(() => u), borderColor: '#c77700', borderDash: [6, 4], pointRadius: 0 }] },
+    options: { responsive: true, scales: { y: { min: 0, max: 1 } }, plugins: { title: { display: true, text: 'Riesgo de los últimos 30 días' } } }
+  });
+}
+
+function pintarTarjetas() {
+  $('territorio').textContent = datos.territorio.nombre;
+  $('umbral').textContent = datos.umbral.toFixed(2).replace('.', ',');
+  $('generado').textContent = 'Datos generados: ' + fmtFecha(datos.generado);
+  const rv = datos.riesgo_vigente;
+  if (rv && rv.indice !== null) {
+    $('r-valor').textContent = num(rv.indice, 2);
+    $('r-nivel').innerHTML = ''; const s = document.createElement('b');
+    s.textContent = (rv.nivel === 'ALTO' ? 'Riesgo ALTO' : 'Por debajo del umbral') + (rv.demo ? ' · DEMO' : ''); s.className = rv.nivel === 'ALTO' ? 'alto' : 'ok'; $('r-nivel').appendChild(s);
+    $('r-detalle').textContent = `Emitido ${rv.fecha_emision} · válido para ${rv.fecha_objetivo}`;
+  } else {
+    $('r-valor').textContent = 'Sin información';
+    $('r-nivel').textContent = rv ? 'Datos ' + rv.estado_datos.replace('_', ' ') : '';
+    $('r-detalle').textContent = rv ? 'No se emitió puntuación ni alerta automática.' : '';
+  }
+  const c = datos.clima;
+  $('c-datos').textContent = c ? `Temp: ${num(c.temperatura_c, 1, ' °C')} · Humedad: ${num(c.humedad_pct, 0, ' %')} · Viento: ${num(c.viento_kmh, 0, ' km/h')}` : 'Sin información';
+  $('c-fuente').textContent = c ? `${c.fuente} · ${fmtFecha(c.fecha_hora_obs)}` : '';
+  const a = datos.antiguedad_horas; $('antig').innerHTML = '';
+  Object.entries(a).forEach(([k, h]) => { const d = document.createElement('div'); d.textContent = `${k}: ${antig(h)}`; if (h === null || h > 24) d.className = 'warn'; $('antig').appendChild(d); });
+}
+
+async function cargarHistorial() {
+  const q = new URLSearchParams(); q.set('limite', verTodo ? 100 : 5); if ($('h-desde').value) q.set('desde', $('h-desde').value);
+  if ($('h-estado').value) q.set('estado', $('h-estado').value); if ($('h-org').value) q.set('organismo', $('h-org').value);
+  const filas = await api('/api/alertas?' + q); const cuerpo = $('h-cuerpo'); cuerpo.innerHTML = '';
+  if (!filas.length) { const tr = cuerpo.insertRow(); const td = tr.insertCell(); td.colSpan = 5; td.textContent = 'No hay alertas para ese filtro.'; return; }
+  const ESTADO = { enviado: 'pendiente', confirmado: 'confirmado', sin_confirmar: 'sin confirmar', pendiente: 'pendiente', confirmada: 'confirmada' };
+  filas.forEach(a => {
+    const tr = cuerpo.insertRow();
+    tr.insertCell().textContent = fmtFecha(a.fecha_envio) + (a.demo ? ' [DEMO]' : '');
+    tr.insertCell().textContent = a.fecha_objetivo;
+    tr.insertCell().textContent = `${a.indice_riesgo.toFixed(2)} / ${a.umbral_aplicado.toFixed(2)}`;
+    tr.insertCell().textContent = ESTADO[a.estado_global];
+    tr.insertCell().textContent = a.avisos.map(v => `${v.organismo}: ${ESTADO[v.estado]}${v.fecha_confirmacion ? ' (' + fmtFecha(v.fecha_confirmacion) + ')' : ''}${v.reenviado ? ' · reenviado' : ''}`).join(' | ');
+  });
+}
+
+$('h-buscar').onclick = cargarHistorial;
+$('h-mas').onclick = () => { verTodo = !verTodo; $('h-mas').textContent = verTodo ? 'Ver solo las últimas 5' : 'Ver historial completo'; cargarHistorial(); };
+
+async function cargarInformes() {
+  const filas = await api('/api/informes'); const cuerpo = $('i-cuerpo'); cuerpo.innerHTML = '';
+  const ENTREGA = { aceptado_por_proveedor: 'aceptado por el proveedor (no implica lectura)', entregado: 'entregado', rebotado: 'rebotado', no_enviado: 'no enviado', confirmado_por_destinatario: 'entregado' };
+  if (!filas.length) { const td = cuerpo.insertRow().insertCell(); td.colSpan = 4; td.textContent = 'Todavía no hay informes aprobados.'; return; }
+  filas.forEach(i => {
+    const tr = cuerpo.insertRow();
+    tr.insertCell().textContent = `${i.periodo_inicio} al ${i.periodo_fin}`;
+    tr.insertCell().textContent = fmtFecha(i.fecha_generacion);
+    tr.insertCell().textContent = ENTREGA[i.estado_entrega];
+    const c = tr.insertCell();
+    if (i.estado_entrega === 'confirmado_por_destinatario') c.textContent = `${i.confirmado_por} · ${fmtFecha(i.fecha_confirmacion)}`;
+    else if (['autoridad', 'administrador'].includes(usuario.rol) && ['aceptado_por_proveedor', 'entregado'].includes(i.estado_entrega)) {
+      const b = document.createElement('button'); b.className = 'btn'; b.textContent = 'Confirmar recepción';
+      b.onclick = async () => { try { await api(`/api/informes/${i.id_informe}/confirmar`, { method: 'POST' }); cargarInformes(); } catch (e) { alert(e.message); } };
+      c.appendChild(b);
+    } else c.textContent = 'Pendiente';
+  });
+}
+$('ventana').onchange = () => { contarFocos(); try { pintarMapa(); } catch (e) {} };
+
+$('u-guardar').onclick = async () => {
+  try { const r = await api('/api/umbral', { method: 'PUT', body: JSON.stringify({ valor: parseFloat($('u-valor').value) }) });
+    $('u-msg').textContent = 'Umbral guardado: ' + r.umbral.toFixed(2); await actualizar(); } catch (e) { $('u-msg').textContent = e.message; }
+};
+
+async function actualizar() {
+  datos = await api('/api/datos');
+  pintarTarjetas(); contarFocos();  // primero lo esencial: si falla una librería externa (mapa o gráfico) las tarjetas igual se ven
+  try { crearMapa(); pintarMapa(); } catch (e) { console.error('Mapa:', e); $('mapa').textContent = 'No se pudo cargar el mapa (¿sin acceso a internet?).'; }
+  try { pintarGrafico(); } catch (e) { console.error('Gráfico:', e); }
+}
+
+async function iniciar() {
+  $('login').classList.add('oculto');
+  const payload = JSON.parse(atob(token.split('.')[1].replace(/-/g, '+').replace(/_/g, '/')));
+  usuario = { nombre: payload.sub, rol: payload.rol };
+  $('usuario').textContent = `${usuario.nombre} · ${usuario.rol} `;
+  if (usuario.rol === 'administrador') { $('b-conf').classList.remove('oculto'); const c = await api('/api/config'); $('u-valor').value = c.umbral; }
+  await actualizar();
+  setInterval(() => actualizar().catch(() => {}), 15 * 60 * 1000);
+}
+
+token = leerSesion();
+if (token) iniciar().catch(mostrarLogin);
+</script>
+</body>
+</html>
